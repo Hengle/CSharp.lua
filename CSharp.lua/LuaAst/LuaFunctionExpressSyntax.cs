@@ -24,12 +24,11 @@ namespace CSharpLua.LuaAst {
   public class LuaFunctionExpressionSyntax : LuaExpressionSyntax {
     public readonly LuaParameterListSyntax ParameterList = new LuaParameterListSyntax();
     public string FunctionKeyword => Tokens.Function;
-    public bool HasYield { get; set; }
-    public int TempIndex;
+    public int TempCount;
 
     public readonly LuaBlockSyntax Body = new LuaBlockSyntax() {
-      OpenBraceToken = Tokens.Empty,
-      CloseBraceToken = Tokens.End,
+      OpenToken = Tokens.Empty,
+      CloseToken = Tokens.End,
     };
 
     public void AddParameter(LuaParameterSyntax parameter) {
@@ -63,6 +62,7 @@ namespace CSharpLua.LuaAst {
 
   public sealed class LuaConstructorAdapterExpressionSyntax : LuaFunctionExpressionSyntax {
     public bool IsInvokeThisCtor { get; set; }
+    public bool IsStatic { get; set; }
   }
 
   public abstract class LuaCheckReturnFunctionExpressionSyntax : LuaFunctionExpressionSyntax {

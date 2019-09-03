@@ -25,10 +25,7 @@ namespace CSharpLua.LuaAst {
     public LuaExpressionSyntax Expression { get; }
 
     public LuaArgumentSyntax(LuaExpressionSyntax expression) {
-      if (expression == null) {
-        throw new ArgumentNullException(nameof(expression));
-      }
-      Expression = expression;
+      Expression = expression ?? throw new ArgumentNullException(nameof(expression));
     }
 
     internal override void Render(LuaRenderer renderer) {
@@ -40,10 +37,7 @@ namespace CSharpLua.LuaAst {
     public string OpenParenToken => Tokens.OpenParentheses;
     public string CloseParenToken => Tokens.CloseParentheses;
     public readonly LuaSyntaxList<LuaArgumentSyntax> Arguments = new LuaSyntaxList<LuaArgumentSyntax>();
-
-    internal override void Render(LuaRenderer renderer) {
-      renderer.Render(this);
-    }
+    public bool IsCallSingleTable { get; set; }
 
     public void AddArgument(LuaArgumentSyntax argument) {
       Arguments.Add(argument);
@@ -57,6 +51,10 @@ namespace CSharpLua.LuaAst {
       foreach (var argument in arguments) {
         AddArgument(argument);
       }
+    }
+
+    internal override void Render(LuaRenderer renderer) {
+      renderer.Render(this);
     }
   }
 }

@@ -1,7 +1,37 @@
 require("strict")
---require("socket")
---local conf = { time = socket.gettime }
-require("All")()
+local socket = require("socket")
+local timeout
+local conf = { 
+  time = socket and socket.gettime or os.time,
+  setTimeout = function (fn, delay)
+    assert(not timeout)
+    timeout = { 
+      f = function ()
+        timeout = nil
+        fn()
+      end, 
+      delay = delay 
+    }
+    return timeout
+  end,
+  clearTimeout = function (id)
+		assert(timeout == id)
+		timeout = nil
+  end
+}
+
+local function runTimeout()
+	local now = conf.time()
+  while true do
+    if (conf.time() - now) * 1000 >= timeout.delay then
+      timeout.f()
+      break
+    end
+  end
+end
+
+package.path = package.path .. ";CSharp.lua/Coresystem.lua/?.lua"
+require("All")("", conf)
 collectgarbage("collect")
 print(collectgarbage("count"))
 
@@ -30,6 +60,9 @@ local function testDateTimeAndTimeSpan()
     
   date = date + System.TimeSpan.FromDays(2)
   print(date:ToString())
+  
+  date = date:AddMonths(2);
+  print(date:ToString())
     
   local baseTime = System.DateTime(1970, 1, 1) 
   print(baseTime:ToString())
@@ -37,7 +70,7 @@ local function testDateTimeAndTimeSpan()
 end
 
 local function testArray() 
-  local arr = System.Array(System.Int):new(10)
+  local arr = System.Array(System.Int32):new(10)
   print(arr:ToString(), #arr)
   printList(arr)
   arr:set(0, 2)
@@ -71,7 +104,11 @@ local function testDictionary()
   dict:Add("c", 25)
   dict:Add("d", 30)
   for _,  pair in System.each(dict) do
-    print(pair.key, pair.value)
+    print(pair.Key, pair.Value)
+  end
+  print("-------------")
+  for k, v in System.pairs(dict) do
+     print(k, v)
   end
 end
 
@@ -95,61 +132,75 @@ local function testDelegate()
     prints = prints .. s
     print(s)
   end
+
   local function assertExt(s)
     assert(prints == s, s)
     prints = ""
   end
+
   local d1 = function() printExt("d1") end
   local d2 = function() printExt("d2") end
   local d3 = function() printExt("d3") end
-  System.combine(nil, d1)()
+
+  local f = nil + d1 
+  f()
+  assertExt("d1") 
+  print("--")
+  
+  f = d1 + nil
+  f()
   assertExt("d1")
   print("--")
-    
-  System.combine(d1, nil)()
-  assertExt("d1")
-  print("--")
-    
-  System.combine(d1, d2)()
+  
+  f = d1 + d2
+  f()
   assertExt("d1d2")
   print("--")
-    
-  System.combine(d1, System.combine(d2, d3))()
+   
+  f = d1 + (d2 + d3) 
+  f()
   assertExt("d1d2d3")
   print("--")
-    
-  System.combine(System.combine(d1, d2), System.combine(d2, d3))()
+     
+  f = (d1 + d2) + (d2 + d3)  
+  f()
   assertExt("d1d2d2d3")
   print("--")
-    
-  System.remove(System.combine(d1, d2), d1)()
+  
+  f = d1 + d2 - d1  
+  f()
   assertExt("d2")
   print("--")
-    
-  System.remove(System.combine(d1, d2), d2)()
+   
+  f = d1 + d2 - d2 
+  f()
   assertExt("d1")
   print("--")
-    
-  System.remove(System.combine(System.combine(d1, d2), d1), d1)()
+   
+  f = d1 + d2 + d1 - d1
+  f()
   assertExt("d1d2")
   print("--")
-    
-  System.remove(System.combine(System.combine(d1, d2), d3), System.combine(d1, d2))()
+  
+  f = d1 + d2 + d3 - (d1 + d2) 
+  f()
   assertExt("d3")
   print("--")
     
-  System.remove(System.combine(System.combine(d1, d2), d3), System.combine(d2, d1))()
+  f = d1 + d2 + d3 - (d2 + d1)
+  f()
   assertExt("d1d2d3")
   print("--")
-    
-  local fn0 = System.combine(System.combine(d1, d2), System.combine(System.combine(d3, d1), d2))
-  local fn1 = System.combine(d1, d2)
-  System.remove(fn0, fn1)()
+   
+  f = (d1 + d2) + (d3 + d1 + d2) 
+  local f1 = d1 + d2
+  f = f - f1
+  f()
   assertExt("d1d2d3")
     
   print("--")
-  local i = System.remove(System.combine(d1, d2), System.combine(d1, d2))
-  print(i == nil)
+  f = (d1 + d2) - (d1 + d2)
+  print(f == nil)
 end
 
 local function testLinq()
@@ -188,6 +239,26 @@ local function testLinq()
   printList(t1)
 end 
 
+local function testGroupBy() 
+  local Linq = System.Linq.Enumerable
+  local list = System.List(System.Object)()
+  list:Add({ id = 5, Template = 30 })
+  list:Add({ id = 6, Template = 30 })
+  list:Add({ id = 1, Template = 1 })
+  list:Add({ id = 2, Template = 2 })
+  list:Add({ id = 3, Template = 1 })
+  list:Add({ id = 4, Template = 2 })
+  local groups = Linq.GroupBy(list, function (i) return i.Template end, System.Int)
+  local s = ""
+  for _,  group in System.each(groups) do
+    for _, item in System.each(group) do
+      s = s .. item.id
+    end
+  end
+  print(s)
+  assert(s == "561324");
+end
+
 local function testType()
   local ins = 2
   print(System.is(ins, System.Double))
@@ -225,7 +296,65 @@ local function testIO()
   File.WriteAllText(path, s)
   local text = File.ReadAllText(path)
   assert(text == s)
-  os.remove(path)
+  File.Delete(path)
+end
+
+local function testStringBuilder()
+  local sb = System.StringBuilder()
+  sb:Append("aa")
+  sb:Append("bbcc")
+  sb:setLength(5)  
+  print(sb, sb:getLength())
+end
+
+local function testAsync()  
+	-- Generated by CSharp.lua Compiler
+	local System = System
+	local Test
+	System.import(function (global)
+		Test = global.Test
+	end)
+	System.namespace("Test", function (namespace)
+		namespace.class("TestAsync", function (namespace)
+			local f, __ctor__
+			__ctor__ = function (this)
+				local t = f(this)
+				System.Console.WriteLine(("{0}, {1}"):Format(t:getStatus():ToEnumString(System.TaskStatus), t:getException()))
+			end
+			f = function (this)
+				return System.async(function (async, this)
+					local t = System.Task.Delay(2000)
+					async:await(t)
+					async:await(t)
+					System.Console.WriteLine(("Delay {0}"):Format(t:getStatus():ToEnumString(System.TaskStatus)))
+				end, nil, this)
+			end
+			return {
+				f = f,
+				__ctor__ = __ctor__
+			}
+		end)
+
+		namespace.class("Program", function (namespace)
+			local Main
+			Main = function ()
+				Test.TestAsync()
+			end
+			return {
+				Main = Main
+			}
+		end)
+	end)
+
+	System.init({
+		"Test.Program",
+		"Test.TestAsync"
+	}, {
+		Main = "Test.Program.Main"
+	})
+
+	Test.Program.Main() 
+  runTimeout()
 end
 
 test(testDateTimeAndTimeSpan, "DateTime & TimeSpan")
@@ -235,8 +364,11 @@ test(testDictionary, "Dictionary")
 test(testYeild, "Yeild")
 test(testDelegate, "Delegate")
 test(testLinq, "Linq")
+test(testGroupBy, "GroupBy")
 test(testType, "Type")
---test(testNumCast, "NumCast")
+test(testNumCast, "NumCast")
 test(testSplit, "testSplit")
+test(testStringBuilder, "StringBuilder")
+test(testIO, "IO")
 --test(testConsole, "Console")
---test(testIO, "IO")
+--test(testAsync, "Async")

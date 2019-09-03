@@ -26,6 +26,16 @@ namespace CSharpLua.LuaAst {
     public readonly LuaSyntaxList<LuaIdentifierNameSyntax> Variables = new LuaSyntaxList<LuaIdentifierNameSyntax>();
     public LuaEqualsValueClauseListSyntax Initializer { get; set; }
 
+    public LuaLocalVariablesStatementSyntax() {
+    }
+
+    public LuaLocalVariablesStatementSyntax(IEnumerable<LuaIdentifierNameSyntax> variables, IEnumerable<LuaExpressionSyntax> valuse = null) {
+      Variables.AddRange(variables);
+      if (valuse != null) {
+        Initializer = new LuaEqualsValueClauseListSyntax(valuse);
+      }
+    }
+
     internal override void Render(LuaRenderer renderer) {
       renderer.Render(this);
     }
@@ -34,6 +44,14 @@ namespace CSharpLua.LuaAst {
   public sealed class LuaEqualsValueClauseListSyntax : LuaSyntaxNode {
     public string EqualsToken => Tokens.Equals;
     public readonly LuaSyntaxList<LuaExpressionSyntax> Values = new LuaSyntaxList<LuaExpressionSyntax>();
+
+    public LuaEqualsValueClauseListSyntax() {
+
+    }
+
+    public LuaEqualsValueClauseListSyntax(IEnumerable<LuaExpressionSyntax> values) {
+      Values.AddRange(values);
+    }
 
     internal override void Render(LuaRenderer renderer) {
       renderer.Render(this);
@@ -44,7 +62,7 @@ namespace CSharpLua.LuaAst {
     public LuaVariableDeclarationSyntax Declaration { get; }
 
     public LuaLocalDeclarationStatementSyntax(LuaVariableDeclarationSyntax declaration) {
-      Declaration = declaration;
+      Declaration = declaration ?? throw new ArgumentNullException(nameof(declaration));
     }
 
     internal override void Render(LuaRenderer renderer) {
@@ -67,10 +85,7 @@ namespace CSharpLua.LuaAst {
     public LuaVariableDeclaratorSyntax Declarator { get; }
 
     public LuaLocalVariableDeclaratorSyntax(LuaVariableDeclaratorSyntax declarator) {
-      if (declarator == null) {
-        throw new ArgumentNullException(nameof(declarator));
-      }
-      Declarator = declarator;
+      Declarator = declarator ?? throw new ArgumentNullException(nameof(declarator));
     }
 
     public LuaLocalVariableDeclaratorSyntax(LuaIdentifierNameSyntax identifier, LuaExpressionSyntax expression = null) {
@@ -88,10 +103,7 @@ namespace CSharpLua.LuaAst {
     public LuaEqualsValueClauseSyntax Initializer { get; set; }
 
     public LuaVariableDeclaratorSyntax(LuaIdentifierNameSyntax identifier, LuaExpressionSyntax expression = null) {
-      if (identifier == null) {
-        throw new ArgumentNullException(nameof(identifier));
-      }
-      Identifier = identifier;
+      Identifier = identifier ?? throw new ArgumentNullException(nameof(identifier));
       if (expression != null) {
         Initializer = new LuaEqualsValueClauseSyntax(expression);
       }
@@ -107,10 +119,7 @@ namespace CSharpLua.LuaAst {
     public LuaExpressionSyntax Value { get; }
 
     public LuaEqualsValueClauseSyntax(LuaExpressionSyntax value) {
-      if (value == null) {
-        throw new ArgumentNullException(nameof(value));
-      }
-      Value = value;
+      Value = value ?? throw new ArgumentNullException(nameof(value));
     }
 
     internal override void Render(LuaRenderer renderer) {
@@ -133,11 +142,11 @@ namespace CSharpLua.LuaAst {
     public LuaIdentifierNameSyntax IdentifierName { get; }
     public LuaFunctionExpressionSyntax FunctionExpression { get; }
 
-    public LuaLocalFunctionSyntx(LuaIdentifierNameSyntax identifierName, LuaFunctionExpressionSyntax functionExpression, List<LuaStatementSyntax> documentationComments = null) {
+    public LuaLocalFunctionSyntx(LuaIdentifierNameSyntax identifierName, LuaFunctionExpressionSyntax functionExpression, LuaDocumentStatement documentation = null) {
       IdentifierName = identifierName ?? throw new ArgumentNullException(nameof(identifierName));
       FunctionExpression = functionExpression ?? throw new ArgumentNullException(nameof(functionExpression));
-      if (documentationComments != null) {
-        Comments.Statements.AddRange(documentationComments);
+      if (documentation != null) {
+        Comments.Statements.Add(documentation);
       }
     }
 
@@ -146,12 +155,19 @@ namespace CSharpLua.LuaAst {
     }
   }
 
-  public sealed class LuatLocalTupleVariableExpression : LuaExpressionSyntax {
+  public sealed class LuaLocalTupleVariableExpression : LuaExpressionSyntax {
     public string LocalKeyword => Tokens.Local;
     public readonly LuaSyntaxList<LuaIdentifierNameSyntax> Variables = new LuaSyntaxList<LuaIdentifierNameSyntax>();
 
     internal override void Render(LuaRenderer renderer) {
       renderer.Render(this);
+    }
+
+    public LuaLocalTupleVariableExpression() {
+    }
+
+    public LuaLocalTupleVariableExpression(IEnumerable<LuaIdentifierNameSyntax> variables) {
+      Variables.AddRange(variables);
     }
   }
 }

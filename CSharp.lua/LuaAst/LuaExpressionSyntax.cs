@@ -27,7 +27,25 @@ namespace CSharpLua.LuaAst {
       }
     }
 
+    public static implicit operator LuaExpressionSyntax(string valueText) {
+      LuaIdentifierNameSyntax identifierName = valueText;
+      return identifierName;
+    }
+
+    public static implicit operator LuaExpressionSyntax(double number) {
+      LuaNumberLiteralExpressionSyntax numberLiteral = number;
+      return numberLiteral;
+    }
+
     public static readonly LuaExpressionSyntax EmptyExpression = new EmptyLuaExpressionSyntax();
+
+    public LuaBinaryExpressionSyntax And(LuaExpressionSyntax right) {
+      return new LuaBinaryExpressionSyntax(this, Tokens.And, right);
+    }
+
+    public LuaBinaryExpressionSyntax Or(LuaExpressionSyntax right) {
+      return new LuaBinaryExpressionSyntax(this, Tokens.Or, right);
+    }
   }
 
   public sealed class LuaAssignmentExpressionSyntax : LuaExpressionSyntax {
@@ -125,18 +143,12 @@ namespace CSharpLua.LuaAst {
   }
 
   public sealed class LuaArrayTypeAdapterExpressionSyntax : LuaExpressionSyntax {
-    public LuaInvocationExpressionSyntax InvocationExpression { get; }
+    public LuaExpressionSyntax TypeExpression { get; }
     public LuaArrayRankSpecifierSyntax RankSpecifier { get; }
 
-    public LuaArrayTypeAdapterExpressionSyntax(LuaInvocationExpressionSyntax invocationExpression, LuaArrayRankSpecifierSyntax rankSpecifier) {
-      InvocationExpression = invocationExpression ?? throw new ArgumentNullException(nameof(invocationExpression));
+    public LuaArrayTypeAdapterExpressionSyntax(LuaExpressionSyntax typeExpression, LuaArrayRankSpecifierSyntax rankSpecifier) {
+      TypeExpression = typeExpression ?? throw new ArgumentNullException(nameof(typeExpression));
       RankSpecifier = rankSpecifier ?? throw new ArgumentNullException(nameof(rankSpecifier));
-    }
-
-    public LuaExpressionSyntax BaseType {
-      get {
-        return InvocationExpression.ArgumentList.Arguments[0].Expression;
-      }
     }
 
     public bool IsSimapleArray {
@@ -146,7 +158,7 @@ namespace CSharpLua.LuaAst {
     }
 
     internal override void Render(LuaRenderer renderer) {
-      InvocationExpression.Render(renderer);
+      TypeExpression.Render(renderer);
     }
   }
 
@@ -164,6 +176,13 @@ namespace CSharpLua.LuaAst {
 
   public sealed class LuaSequenceListExpressionSyntax : LuaExpressionSyntax {
     public readonly LuaSyntaxList<LuaExpressionSyntax> Expressions = new LuaSyntaxList<LuaExpressionSyntax>();
+
+    public LuaSequenceListExpressionSyntax() {
+    }
+
+    public LuaSequenceListExpressionSyntax(IEnumerable<LuaExpressionSyntax> expressions) {
+      Expressions.AddRange(expressions);
+    }
 
     internal override void Render(LuaRenderer renderer) {
       renderer.Render(this);

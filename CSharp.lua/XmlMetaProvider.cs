@@ -23,7 +23,6 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Xml.Serialization;
 using Microsoft.CodeAnalysis;
-using CSharpLua.LuaAst;
 
 namespace CSharpLua {
   public sealed class XmlMetaProvider {
@@ -45,6 +44,8 @@ namespace CSharpLua {
         public TemplateModel get;
         [XmlAttribute]
         public string IsField;
+        [XmlAttribute]
+        public bool Baned;
 
         public bool? CheckIsField {
           get {
@@ -66,11 +67,17 @@ namespace CSharpLua {
         public string name;
         [XmlAttribute]
         public string Template;
+        [XmlAttribute]
+        public bool Baned;
+        [XmlAttribute]
+        public bool IsProperty;
       }
 
       public sealed class ArgumentModel {
         [XmlAttribute]
         public string type;
+        [XmlElement("arg")]
+        public ArgumentModel[] GenericArgs;
       }
 
       public sealed class MethodModel {
@@ -90,6 +97,8 @@ namespace CSharpLua {
         public int GenericArgCount = -1;
         [XmlAttribute]
         public bool IgnoreGeneric;
+        [XmlAttribute]
+        public bool Baned;
       }
 
       public sealed class ClassModel {
@@ -104,7 +113,11 @@ namespace CSharpLua {
         [XmlElement("method")]
         public MethodModel[] Methods;
         [XmlAttribute]
-        public string Import;
+        public bool IgnoreGeneric;
+        [XmlAttribute]
+        public bool Baned;
+        [XmlAttribute]
+        public bool Readonly;
       }
 
       public sealed class NamespaceModel {
@@ -114,27 +127,19 @@ namespace CSharpLua {
         public string Name;
         [XmlElement("class")]
         public ClassModel[] Classes;
+        [XmlAttribute]
+        public bool Baned;
       }
 
       public sealed class AssemblyModel {
         [XmlElement("namespace")]
         public NamespaceModel[] Namespaces;
-      }
-
-      public sealed class ExportModel {
-        public sealed class AttributeModel {
-          [XmlAttribute("name")]
-          public string Name;
-        }
-        [XmlElement("attribute")]
-        public AttributeModel[] Attributes;
+        [XmlElement("class")]
+        public ClassModel[] Classes;
       }
 
       [XmlElement("assembly")]
       public AssemblyModel Assembly;
-
-      [XmlElement("export")]
-      public ExportModel Export;
     }
 
     private enum MethodMetaType {
@@ -144,7 +149,7 @@ namespace CSharpLua {
     }
 
     private sealed class MethodMetaInfo {
-      private List<XmlMetaModel.MethodModel> models_ = new List<XmlMetaModel.MethodModel>();
+      private readonly List<XmlMetaModel.MethodModel> models_ = new List<XmlMetaModel.MethodModel>();
       private bool isSingleModel_;
 
       public void Add(XmlMetaModel.MethodModel model) {
@@ -163,17 +168,64 @@ namespace CSharpLua {
         isSingleModel_ = isSingle;
       }
 
-      private bool IsTypeMatch(ITypeSymbol symbol, string typeString) {
+      private static string GetTypeString(ITypeSymbol symbol) {
+        if (symbol.Kind == SymbolKind.TypeParameter) {
+          return symbol.Name;
+        }
+
+        StringBuilder sb = new StringBuilder();
         INamedTypeSymbol typeSymbol = (INamedTypeSymbol)symbol.OriginalDefinition;
-        string namespaceName = typeSymbol.ContainingNamespace.ToString();
-        string name;
-        if (typeSymbol.TypeArguments.Length == 0) {
-          name = $"{namespaceName}.{symbol.Name}";
+        var namespaceSymbol = typeSymbol.ContainingNamespace;
+        
+        if(symbol.ContainingType != null) {
+          sb.Append(GetTypeString(symbol.ContainingType));
+          sb.Append('.');
         }
-        else {
-          name = $"{namespaceName}.{symbol.Name}^{typeSymbol.TypeArguments.Length}";
+        else if (!namespaceSymbol.IsGlobalNamespace) {
+          sb.Append(namespaceSymbol.ToString());
+          sb.Append('.');
         }
-        return name == typeString;
+        sb.Append(symbol.Name);
+        if (typeSymbol.TypeArguments.Length > 0) {
+          sb.Append('^');
+          sb.Append(typeSymbol.TypeArguments.Length);
+        }
+        return sb.ToString();
+      }
+
+      private static bool IsTypeMatch(ITypeSymbol symbol, string typeString) {
+        if (symbol.Kind == SymbolKind.ArrayType) {
+          var typeSymbol = (IArrayTypeSymbol)symbol;
+          string elementTypeName = GetTypeString(typeSymbol.ElementType);
+          return elementTypeName + "[]" == typeString;
+        } else {
+          string name = GetTypeString(symbol);
+          return name == typeString;
+        }
+      }
+
+      private static bool IsArgMatch(ITypeSymbol symbol, XmlMetaModel.ArgumentModel parameterModel) {
+        if (!IsTypeMatch(symbol, parameterModel.type)) {
+          return false;
+        }
+
+        if (parameterModel.GenericArgs != null) {
+          var typeSymbol = (INamedTypeSymbol)symbol;
+          if (typeSymbol.TypeArguments.Length != parameterModel.GenericArgs.Length) {
+            return false;
+          }
+
+          int index = 0;
+          foreach (var typeArgument in typeSymbol.TypeArguments) {
+            var genericArgModel = parameterModel.GenericArgs[index];
+            if (!IsArgMatch(typeArgument, genericArgModel)) {
+              return false;
+            }
+            ++index;
+          }
+        }
+
+        return true;
       }
 
       private bool IsMethodMatch(XmlMetaModel.MethodModel model, IMethodSymbol symbol) {
@@ -207,7 +259,7 @@ namespace CSharpLua {
           int index = 0;
           foreach (var parameter in symbol.Parameters) {
             var parameterModel = model.Args[index];
-            if (!IsTypeMatch(parameter.Type, parameterModel.type)) {
+            if (!IsArgMatch(parameter.Type, parameterModel)) {
               return false;
             }
             ++index;
@@ -218,11 +270,12 @@ namespace CSharpLua {
       }
 
       private string GetName(IMethodSymbol symbol) {
+        XmlMetaModel.MethodModel methodModel;
         if (isSingleModel_) {
-          return models_.First().Name;
+          methodModel = models_.First();
+        } else {
+          methodModel = models_.Find(i => IsMethodMatch(i, symbol));
         }
-
-        var methodModel = models_.Find(i => IsMethodMatch(i, symbol));
         return methodModel?.Name;
       }
 
@@ -232,18 +285,26 @@ namespace CSharpLua {
         }
 
         var methodModel = models_.Find(i => IsMethodMatch(i, symbol));
+        if (methodModel != null && methodModel.Baned) {
+          throw new CompilationErrorException($"{symbol} is baned");
+        }
         return methodModel?.Template;
       }
 
       private string GetIgnoreGeneric(IMethodSymbol symbol) {
         bool isIgnoreGeneric = false;
+        XmlMetaModel.MethodModel methodModel;
         if (isSingleModel_) {
-          isIgnoreGeneric = models_.First().IgnoreGeneric;
+          methodModel = models_.First();
+          isIgnoreGeneric = methodModel.IgnoreGeneric;
         } else {
-          var methodModel = models_.Find(i => IsMethodMatch(i, symbol));
+          methodModel = models_.Find(i => IsMethodMatch(i, symbol));
           if (methodModel != null) {
             isIgnoreGeneric = methodModel.IgnoreGeneric;
           }
+        }
+        if (methodModel != null && methodModel.Baned) {
+          throw new CompilationErrorException($"{symbol} is baned");
         }
         return isIgnoreGeneric ? bool.TrueString : bool.FalseString;
       }
@@ -267,10 +328,10 @@ namespace CSharpLua {
     }
 
     private sealed class TypeMetaInfo {
-      private XmlMetaModel.ClassModel model_;
-      private Dictionary<string, XmlMetaModel.FieldModel> fields_ = new Dictionary<string, XmlMetaModel.FieldModel>();
-      private Dictionary<string, XmlMetaModel.PropertyModel> propertys_ = new Dictionary<string, XmlMetaModel.PropertyModel>();
-      private Dictionary<string, MethodMetaInfo> methods_ = new Dictionary<string, MethodMetaInfo>();
+      private readonly XmlMetaModel.ClassModel model_;
+      private readonly Dictionary<string, XmlMetaModel.FieldModel> fields_ = new Dictionary<string, XmlMetaModel.FieldModel>();
+      private readonly Dictionary<string, XmlMetaModel.PropertyModel> propertys_ = new Dictionary<string, XmlMetaModel.PropertyModel>();
+      private readonly Dictionary<string, MethodMetaInfo> methods_ = new Dictionary<string, MethodMetaInfo>();
 
       public TypeMetaInfo(XmlMetaModel.ClassModel model) {
         model_ = model;
@@ -345,9 +406,8 @@ namespace CSharpLua {
       }
     }
 
-    private Dictionary<string, string> namespaceNameMaps_ = new Dictionary<string, string>();
-    private Dictionary<string, TypeMetaInfo> typeMetas_ = new Dictionary<string, TypeMetaInfo>();
-    private HashSet<string> exportAttributes_ = new HashSet<string>();
+    private readonly Dictionary<string, XmlMetaModel.NamespaceModel> namespaceNameMaps_ = new Dictionary<string, XmlMetaModel.NamespaceModel>();
+    private readonly Dictionary<string, TypeMetaInfo> typeMetas_ = new Dictionary<string, TypeMetaInfo>();
 
     public XmlMetaProvider(IEnumerable<string> files) {
       foreach (string file in files) {
@@ -356,25 +416,18 @@ namespace CSharpLua {
           using (Stream stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read)) {
             XmlMetaModel model = (XmlMetaModel)xmlSeliz.Deserialize(stream);
             var assembly = model.Assembly;
-            if (assembly != null && assembly.Namespaces != null) {
-              foreach (var namespaceModel in assembly.Namespaces) {
-                LoadNamespace(namespaceModel);
-              }
-            }
-            var export = model.Export;
-            if (export != null) {
-              if (export.Attributes != null) {
-                foreach (var attribute in export.Attributes) {
-                  if (string.IsNullOrEmpty(attribute.Name)) {
-                    throw new ArgumentException("attribute's name is empty");
-                  }
-                  exportAttributes_.Add(attribute.Name);
+            if (assembly != null) {
+              if (assembly.Namespaces != null) {
+                foreach (var namespaceModel in assembly.Namespaces) {
+                  LoadNamespace(namespaceModel);
                 }
+              }
+              if (assembly.Classes != null) {
+                LoadType(string.Empty, assembly.Classes);
               }
             }
           }
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
           throw new Exception($"load xml file wrong at {file}", e);
         }
       }
@@ -382,15 +435,17 @@ namespace CSharpLua {
 
     private void LoadNamespace(XmlMetaModel.NamespaceModel model) {
       string namespaceName = model.name;
-      if (string.IsNullOrEmpty(namespaceName)) {
-        throw new ArgumentException("namespace's name is empty");
+      if (namespaceName == null) {
+        throw new ArgumentException("namespace's name is null");
       }
 
-      if (!string.IsNullOrEmpty(model.Name)) {
+      if (namespaceName.Length > 0) {
         if (namespaceNameMaps_.ContainsKey(namespaceName)) {
           throw new ArgumentException($"namespace [{namespaceName}] is already has");
         }
-        namespaceNameMaps_.Add(namespaceName, model.Name);
+        if (!string.IsNullOrEmpty(model.Name) || model.Baned) {
+          namespaceNameMaps_.Add(namespaceName, model);
+        }
       }
 
       if (model.Classes != null) {
@@ -406,7 +461,7 @@ namespace CSharpLua {
           throw new ArgumentException($"namespace [{namespaceName}] has a class's name is empty");
         }
 
-        string classesfullName = namespaceName + '.' + className;
+        string classesfullName = namespaceName.Length > 0 ? namespaceName + '.' + className : className;
         classesfullName = classesfullName.Replace('^', '_');
         if (typeMetas_.ContainsKey(classesfullName)) {
           throw new ArgumentException($"type [{classesfullName}] is already has");
@@ -417,11 +472,18 @@ namespace CSharpLua {
     }
 
     public string GetNamespaceMapName(INamespaceSymbol symbol, string original) {
-      return namespaceNameMaps_.GetOrDefault(original);
+      var info = namespaceNameMaps_.GetOrDefault(original);
+      if (info != null) {
+        if (info.Baned) {
+          throw new CompilationErrorException($"{symbol} is baned");
+        }
+        return info.Name;
+      }
+      return null;
     }
 
     internal bool MayHaveCodeMeta(ISymbol symbol) {
-      return symbol.DeclaredAccessibility == Accessibility.Public && !symbol.IsFromCode();
+      return symbol.DeclaredAccessibility == Accessibility.Public && symbol.IsFromAssembly();
     }
 
     private string GetTypeShortString(ISymbol symbol) {
@@ -431,15 +493,43 @@ namespace CSharpLua {
 
     internal string GetTypeMapName(ISymbol symbol, string shortName) {
       if (MayHaveCodeMeta(symbol)) {
-        TypeMetaInfo info = typeMetas_.GetOrDefault(shortName);
+        var info = GetTypeMetaInfo(shortName);
         return info?.Model.Name;
       }
       return null;
     }
 
+    internal bool IsTypeIgnoreGeneric(INamedTypeSymbol typeSymbol) {
+      if (MayHaveCodeMeta(typeSymbol)) {
+        var info = GetTypeMetaInfo(typeSymbol);
+        return info != null && info.Model.IgnoreGeneric;
+      }
+      return false;
+    }
+
+    internal bool IsTypeReadOnly(INamedTypeSymbol typeSymbol) {
+      if (MayHaveCodeMeta(typeSymbol)) {
+        var info = GetTypeMetaInfo(typeSymbol);
+        return info != null && info.Model.Readonly;
+      }
+      return false;
+    }
+
+    private TypeMetaInfo GetTypeMetaInfo(string shortName) {
+      var info = typeMetas_.GetOrDefault(shortName);
+      if (info != null && info.Model.Baned) {
+        throw new CompilationErrorException($"{shortName} is baned");
+      }
+      return info;
+    }
+
+    private TypeMetaInfo GetTypeMetaInfo(INamedTypeSymbol typeSymbol) {
+      string shortName = GetTypeShortString(typeSymbol);
+      return GetTypeMetaInfo(shortName);
+    }
+
     private TypeMetaInfo GetTypeMetaInfo(ISymbol memberSymbol) {
-      string typeName = GetTypeShortString(memberSymbol.ContainingType);
-      return typeMetas_.GetOrDefault(typeName);
+      return GetTypeMetaInfo(memberSymbol.ContainingType);
     }
 
     public bool? IsPropertyField(IPropertySymbol symbol) {
@@ -457,10 +547,20 @@ namespace CSharpLua {
       return null;
     }
 
+    public bool IsFieldForceProperty(IFieldSymbol symbol) {
+      if (MayHaveCodeMeta(symbol)) {
+        return GetTypeMetaInfo(symbol)?.GetFieldModel(symbol.Name)?.IsProperty ?? false;
+      }
+      return false;
+    }
+
     public string GetProertyCodeTemplate(IPropertySymbol symbol, bool isGet) {
       if (MayHaveCodeMeta(symbol)) {
         var info = GetTypeMetaInfo(symbol)?.GetPropertyModel(symbol.Name);
         if (info != null) {
+          if (info.Baned) {
+            throw new CompilationErrorException($"{symbol} is baned");
+          }
           return isGet ? info.get?.Template : info.set?.Template;
         }
       }
@@ -469,34 +569,33 @@ namespace CSharpLua {
 
     private string GetInternalMethodMetaInfo(IMethodSymbol symbol, MethodMetaType metaType) {
       Contract.Assert(symbol != null);
-      if (symbol.DeclaredAccessibility != Accessibility.Public) {
+      if (!symbol.IsPublic()) {
         return null;
       }
 
-      string codeTemplate = null;
-      if (!symbol.IsFromCode()) {
-        codeTemplate = GetTypeMetaInfo(symbol)?.GetMethodMetaInfo(symbol.Name)?.GetMetaInfo(symbol, metaType);
+      string metaInfo = null;
+      if (symbol.IsFromAssembly()) {
+        metaInfo = GetTypeMetaInfo(symbol)?.GetMethodMetaInfo(symbol.Name)?.GetMetaInfo(symbol, metaType);
       }
 
-      if (codeTemplate == null) {
+      if (metaInfo == null) {
         if (symbol.IsOverride) {
           if (symbol.OverriddenMethod != null) {
-            codeTemplate = GetInternalMethodMetaInfo(symbol.OverriddenMethod, metaType);
+            metaInfo = GetInternalMethodMetaInfo(symbol.OverriddenMethod, metaType);
           }
-        }
-        else {
+        } else {
           var interfaceImplementations = symbol.InterfaceImplementations();
           if (interfaceImplementations != null) {
             foreach (IMethodSymbol interfaceMethod in interfaceImplementations) {
-              codeTemplate = GetInternalMethodMetaInfo(interfaceMethod, metaType);
-              if (codeTemplate != null) {
+              metaInfo = GetInternalMethodMetaInfo(interfaceMethod, metaType);
+              if (metaInfo != null) {
                 break;
               }
             }
           }
         }
       }
-      return codeTemplate;
+      return metaInfo;
     }
 
     private string GetMethodMetaInfo(IMethodSymbol symbol, MethodMetaType metaType) {
@@ -508,24 +607,25 @@ namespace CSharpLua {
       return GetMethodMetaInfo(symbol, MethodMetaType.Name);
     }
 
+    private bool IsNullableEnumToString(IMethodSymbol symbol, out string template) {
+      var type = symbol.ContainingType;
+      if (type != null && type.IsNullableType(out var elemetType) && elemetType.TypeKind == TypeKind.Enum && symbol.Name == "ToString") {
+        template = "System.ToEnumString({this}, {class})";
+        return true;
+      }
+      template = null;
+      return false;
+    }
+
     public string GetMethodCodeTemplate(IMethodSymbol symbol) {
+      if (IsNullableEnumToString(symbol, out string template)) {
+        return template;
+      }
       return GetMethodMetaInfo(symbol, MethodMetaType.CodeTemplate);
     }
 
     public bool IsMethodIgnoreGeneric(IMethodSymbol symbol) {
       return GetMethodMetaInfo(symbol, MethodMetaType.IgnoreGeneric) == bool.TrueString;
-    }
-
-    public bool IsExportAttribute(INamedTypeSymbol attributeTypeSymbol) {
-      return exportAttributes_.Count > 0 && exportAttributes_.Contains(attributeTypeSymbol.ToString());
-    }
-
-    public void CheckFieldNameOfProtobufnet(ref string fieldName, ITypeSymbol containingType) {
-      if (!containingType.Interfaces.IsEmpty) {
-        if (containingType.Interfaces.First().ToString() == "ProtoBuf.IExtensible") {
-          fieldName = fieldName.TrimStart('_');
-        }
-      }
     }
   }
 }
